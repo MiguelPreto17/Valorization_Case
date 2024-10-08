@@ -34,7 +34,7 @@ st.markdown("""
 def fetch_carbon_intensities(zone, date):
     url = "https://api.electricitymap.org/v3/carbon-intensity/history"
     params = {"zone": zone, "date": date.strftime('%Y-%m-%d')}
-    headers = {"auth-token": "YOUR_API_TOKEN"}
+    headers = {"auth-token": "YOUR_API_TOKEN"}  # Replace with your API token
     response = requests.get(url, params=params, headers=headers)
     if response.status_code == 200:
         data = response.json()
@@ -42,7 +42,6 @@ def fetch_carbon_intensities(zone, date):
     else:
         st.error(f"Failed to fetch carbon intensities for {zone} on {date}.")
         return []
-
 
 # Function to calculate total daily emissions
 def calculate_daily_emissions(charging, emissions):
@@ -152,7 +151,6 @@ df_intensities.columns.name = 'Hour'
 df_intensities = df_intensities.rename(columns={h: f'{h}: gCO2/kWh' for h in df_intensities.columns})
 st.dataframe(df_intensities)
 
-
 # Display bar charts below the table
 for zone in zones:
     st.subheader(f"Carbon Intensity for {zone}")
@@ -194,61 +192,47 @@ else:
     charging_company_2 = np.array(default_charging_values['Company 2 (kW)'])
     charging_company_3 = np.array(default_charging_values['Company 3 (kW)'])
 
-total_charging_company_1 = np.sum(charging_company_1)
-total_charging_company_2 = np.sum(charging_company_2)
-total_charging_company_3 = np.sum(charging_company_3)
+# Agora, você pode calcular as emissões para cada país selecionado
+emissions = []
+hourly_emissions = []
+for i, zone in enumerate(zones):
+    if zone in intensities:
+        charging_values = [charging_company_1, charging_company_2, charging_company_3][i]
+        emissions_company, hourly_emissions_company = calculate_daily_emissions(
+            charging_values, intensities[zone])
+        emissions.append(emissions_company)
+        hourly_emissions.append(hourly_emissions_company)
+    else:
+        st.error(f"Nenhum dado disponível para a zona {zone}.")
 
-emissions_company_1, hourly_emissions_company_1 = calculate_daily_emissions(charging_company_1, intensities["DE"])
-emissions_company_2, hourly_emissions_company_2 = calculate_daily_emissions(charging_company_2, intensities["IT"])
-emissions_company_3, hourly_emissions_company_3 = calculate_daily_emissions(charging_company_3, intensities["PT"])
+# Cálculo dos cenários para cada empresa
+best_cases = []
+worst_cases = []
+for i, zone in enumerate(zones):
+    if zone in intensities:
+        total_charging = np.sum([charging_company_1, charging_company_2, charging_company_3][i])
+        best_case, worst_case = calculate_scenarios(total_charging, intensities[zone])
+        best_cases.append(best_case)
+        worst_cases.append(worst_case)
 
-best_case_1, worst_case_1 = calculate_scenarios(total_charging_company_1, intensities["DE"])
-best_case_2, worst_case_2 = calculate_scenarios(total_charging_company_2, intensities["IT"])
-best_case_3, worst_case_3 = calculate_scenarios(total_charging_company_3, intensities["PT"])
+# Cálculo dos scores
+scores = []
+for i in range(len(emissions)):
+    score = calculate_score(emissions[i], best_cases[i], worst_cases[i])
+    scores.append(score)
 
-score_1 = calculate_score(emissions_company_1, best_case_1, worst_case_1)
-score_2 = calculate_score(emissions_company_2, best_case_2, worst_case_2)
-score_3 = calculate_score(emissions_company_3, best_case_3, worst_case_3)
-
-percent_away_best_1, percent_away_worst_1 = calculate_percentages(emissions_company_1, best_case_1, worst_case_1)
-percent_away_best_2, percent_away_worst_2 = calculate_percentages(emissions_company_2, best_case_2, worst_case_2)
-percent_away_best_3, percent_away_worst_3 = calculate_percentages(emissions_company_3, best_case_3, worst_case_3)
-
+# Criação da tabela de ranking
 companies = ['Company 1', 'Company 2', 'Company 3']
-scores = [score_1, score_2, score_3]
-percent_away_best = [percent_away_best_1, percent_away_best_2, percent_away_best_3]
-percent_away_worst = [percent_away_worst_1, percent_away_worst_2, percent_away_worst_3]
+df_ranking = pd.DataFrame({
+    "Company": companies,
+    "Score": scores,
+    "% away from Best Scenario": [(calculate_percentages(emissions[i], best_cases[i], worst_cases[i])[0]) for i in range(len(emissions))],
+    "% away from Worst Scenario": [(calculate_percentages(emissions[i], best_cases[i], worst_cases[i])[1]) for i in range(len(emissions))]
+})
 
-df_ranking = pd.DataFrame(list(zip(companies, scores, percent_away_best, percent_away_worst)), columns=["Company", "Score", "% away from Best Scenario", "% away from Worst Scenario"])
-
-# Apply conditional styles with arrows
-def style_percentages(value, scenario):
-    if scenario == "best":
-        return f"🔺{value:.2f}%"
-    elif scenario == "worst":
-        return f"🔻{value:.2f}%"
-
-df_ranking["% away from Best Scenario"] = df_ranking.apply(lambda row: style_percentages(row["% away from Best Scenario"], "best"), axis=1)
-df_ranking["% away from Worst Scenario"] = df_ranking.apply(lambda row: style_percentages(row["% away from Worst Scenario"], "worst"), axis=1)
-
-# Display ranking table
+# Exibição da tabela de ranking
 st.subheader("Overall Company Ranking")
-st.dataframe(df_ranking.style.applymap(lambda x: 'color: red' if isinstance(x, str) and x.startswith('🔺') else ('color: green' if isinstance(x, str) and x.startswith('🔻') else '')).set_table_styles([{
-    'selector': 'td',
-    'props': [
-        ('max-width', '200px'), ('font-size', '12px')]
-}]))
 
-st.markdown(
-    """
-    <style>
-    .stDataFrame tbody tr:nth-child(even) {
-        background-color: #f0f2f6;
-    }
-    .stDataFrame tbody tr:nth-child(odd) {
-        background-color: #ffffff;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+# Style scores with arrows
+df_ranking['Score'] = df_ranking['Score'].apply(style_score)
+st.dataframe(df_ranking)

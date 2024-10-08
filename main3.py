@@ -5,36 +5,11 @@ import requests
 import matplotlib.pyplot as plt
 from datetime import datetime
 
-# CSS to customize the Streamlit style
-st.markdown("""
-    <style>
-    .reportview-container {
-        background: #f0f2f6;
-        padding: 1.5rem;
-    }
-    .stMarkdown {
-        background-color: #f0f2f6;
-        border-radius: 0.5rem;
-        padding: 1rem;
-        margin-bottom: 2rem;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
-    .stDataFrame {
-        border-radius: 0.5rem;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
-    .stPlotlyChart {
-        border-radius: 0.5rem;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
 # Function to fetch carbon intensities for a specific zone on the selected day
 def fetch_carbon_intensities(zone, date):
     url = "https://api.electricitymap.org/v3/carbon-intensity/history"
     params = {"zone": zone, "date": date.strftime('%Y-%m-%d')}
-    headers = {"auth-token": "YOUR_API_TOKEN"}
+    headers = {"auth-token": "YOUR_API_TOKEN"}  # Replace with your API token
     response = requests.get(url, params=params, headers=headers)
     if response.status_code == 200:
         data = response.json()
@@ -42,7 +17,6 @@ def fetch_carbon_intensities(zone, date):
     else:
         st.error(f"Failed to fetch carbon intensities for {zone} on {date}.")
         return []
-
 
 # Function to calculate total daily emissions
 def calculate_daily_emissions(charging, emissions):
@@ -92,32 +66,6 @@ def style_score(value):
     else:
         return "0.00%"
 
-# CSS to customize the Streamlit style
-st.markdown("""
-    <style>
-    .reportview-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-    .logo-container {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        width: 100%;
-        margin-bottom: 20px; /* Espaço entre o logotipo e o conteúdo abaixo */
-    }
-    .logo-container img {
-        max-width: 150px; /* Largura máxima do logotipo */
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# Row for logos
-col1, col2 = st.columns([1, 3])  # Ajusta a proporção das colunas
-with col1:
-    st.image("Captura de ecrã 2024-07-09 115045.png", use_column_width=True)
-
 # Streamlit UI
 st.title("Electric Vehicle Charging Impact Analysis")
 
@@ -138,30 +86,36 @@ date = st.date_input("Select the date for analysis", datetime.now())
 # Selection of up to three countries
 zones = st.multiselect("Select up to 3 countries", ["DE", "IT", "PT", "FR", "ES"], default=["PT"])
 
-if len(zones) > 3:
-    st.error("Please select only up to 3 countries.")
+# Verificar se há pelo menos uma zona selecionada
+if len(zones) == 0:
+    st.error("Selecione pelo menos um país para prosseguir.")
+elif len(zones) > 3:
+    st.error("Por favor, selecione no máximo 3 países.")
+else:
+    intensities = {}
+    for zone in zones:
+        intensities[zone] = fetch_carbon_intensities(zone, date)
 
-intensities = {}
-for zone in zones:
-    intensities[zone] = fetch_carbon_intensities(zone, date)
+    # Verificar se houve falha na obtenção das intensidades de carbono para algum país
+    if any([len(intensities[zone]) == 0 for zone in zones]):
+        st.error("Houve um problema ao buscar as intensidades de carbono para um dos países selecionados.")
+    else:
+        # Exibir a tabela de intensidades de carbono com as unidades
+        df_intensities = pd.DataFrame(intensities).T
+        df_intensities.index.name = 'Zone'
+        df_intensities.columns.name = 'Hour'
+        df_intensities = df_intensities.rename(columns={h: f'{h}: gCO2/kWh' for h in df_intensities.columns})
+        st.dataframe(df_intensities)
 
-# Display the table of carbon intensities with units
-df_intensities = pd.DataFrame(intensities).T
-df_intensities.index.name = 'Zone'
-df_intensities.columns.name = 'Hour'
-df_intensities = df_intensities.rename(columns={h: f'{h}: gCO2/kWh' for h in df_intensities.columns})
-st.dataframe(df_intensities)
-
-
-# Display bar charts below the table
-for zone in zones:
-    st.subheader(f"Carbon Intensity for {zone}")
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.bar(range(24), intensities[zone], color='blue')
-    ax.set_title(f"Carbon Intensity for {zone}")
-    ax.set_xlabel("Hour")
-    ax.set_ylabel("Carbon Intensity (gCO2/kWh)")
-    st.pyplot(fig)
+        # Exibir gráficos de barras abaixo da tabela
+        for zone in zones:
+            st.subheader(f"Carbon Intensity for {zone}")
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.bar(range(24), intensities[zone], color='blue')
+            ax.set_title(f"Carbon Intensity for {zone}")
+            ax.set_xlabel("Hour")
+            ax.set_ylabel("Carbon Intensity (gCO2/kWh)")
+            st.pyplot(fig)
 
 # User input for charging values
 st.subheader("Charging Values for Each Company")
@@ -172,11 +126,11 @@ uploaded_file = st.file_uploader("Upload a CSV file", type="csv")
 # Add an information button about CSV rules
 if st.button("📄 CSV Info"):
     st.markdown("""
-        <div style="background-color: #f0f0f0; padding: 10px; border-radius: 5px;">
-            The CSV file must contain the following columns: 'Hour', 'Company 1', 'Company 2', and 'Company 3'. <br>
-            Each column must contain 24 values representing the hours of the day, with 'Company X' values in kW (kilowatts).
-        </div>
-    """, unsafe_allow_html=True)
+            <div style="background-color: #f0f0f0; padding: 10px; border-radius: 5px;">
+                The CSV file must contain the following columns: 'Hour', 'Company 1', 'Company 2', and 'Company 3'. <br>
+                Each column must contain 24 values representing the hours of the day, with 'Company X' values in kW (kilowatts).
+            </div>
+        """, unsafe_allow_html=True)
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
@@ -194,32 +148,55 @@ else:
     charging_company_2 = np.array(default_charging_values['Company 2 (kW)'])
     charging_company_3 = np.array(default_charging_values['Company 3 (kW)'])
 
+# Total charging for each company
 total_charging_company_1 = np.sum(charging_company_1)
 total_charging_company_2 = np.sum(charging_company_2)
 total_charging_company_3 = np.sum(charging_company_3)
 
-emissions_company_1, hourly_emissions_company_1 = calculate_daily_emissions(charging_company_1, intensities["DE"])
-emissions_company_2, hourly_emissions_company_2 = calculate_daily_emissions(charging_company_2, intensities["IT"])
-emissions_company_3, hourly_emissions_company_3 = calculate_daily_emissions(charging_company_3, intensities["PT"])
+# Handling dynamic country selection for emissions
+if len(zones) >= 1:
+    emissions_company_1, hourly_emissions_company_1 = calculate_daily_emissions(charging_company_1,
+                                                                                intensities[zones[0]])
+if len(zones) >= 2:
+    emissions_company_2, hourly_emissions_company_2 = calculate_daily_emissions(charging_company_2,
+                                                                                intensities[zones[1]])
+if len(zones) == 3:
+    emissions_company_3, hourly_emissions_company_3 = calculate_daily_emissions(charging_company_3,
+                                                                                intensities[zones[2]])
 
-best_case_1, worst_case_1 = calculate_scenarios(total_charging_company_1, intensities["DE"])
-best_case_2, worst_case_2 = calculate_scenarios(total_charging_company_2, intensities["IT"])
-best_case_3, worst_case_3 = calculate_scenarios(total_charging_company_3, intensities["PT"])
+# Calculate best and worst scenarios based on available zones
+best_case_1, worst_case_1 = calculate_scenarios(total_charging_company_1, intensities[zones[0]])
+best_case_2, worst_case_2 = calculate_scenarios(total_charging_company_2, intensities[zones[1]])
+if len(zones) == 3:
+    best_case_3, worst_case_3 = calculate_scenarios(total_charging_company_3, intensities[zones[2]])
 
+# Score calculation
 score_1 = calculate_score(emissions_company_1, best_case_1, worst_case_1)
 score_2 = calculate_score(emissions_company_2, best_case_2, worst_case_2)
-score_3 = calculate_score(emissions_company_3, best_case_3, worst_case_3)
+if len(zones) == 3:
+    score_3 = calculate_score(emissions_company_3, best_case_3, worst_case_3)
 
+# Calculate detailed percentages for ranking
 percent_away_best_1, percent_away_worst_1 = calculate_percentages(emissions_company_1, best_case_1, worst_case_1)
 percent_away_best_2, percent_away_worst_2 = calculate_percentages(emissions_company_2, best_case_2, worst_case_2)
-percent_away_best_3, percent_away_worst_3 = calculate_percentages(emissions_company_3, best_case_3, worst_case_3)
+if len(zones) == 3:
+    percent_away_best_3, percent_away_worst_3 = calculate_percentages(emissions_company_3, best_case_3, worst_case_3)
 
-companies = ['Company 1', 'Company 2', 'Company 3']
-scores = [score_1, score_2, score_3]
-percent_away_best = [percent_away_best_1, percent_away_best_2, percent_away_best_3]
-percent_away_worst = [percent_away_worst_1, percent_away_worst_2, percent_away_worst_3]
+# Prepare ranking data based on the number of selected countries
+companies = ['Company 1', 'Company 2']
+scores = [score_1, score_2]
+percent_away_best = [percent_away_best_1, percent_away_best_2]
+percent_away_worst = [percent_away_worst_1, percent_away_worst_2]
 
-df_ranking = pd.DataFrame(list(zip(companies, scores, percent_away_best, percent_away_worst)), columns=["Company", "Score", "% away from Best Scenario", "% away from Worst Scenario"])
+if len(zones) == 3:
+    companies.append('Company 3')
+    scores.append(score_3)
+    percent_away_best.append(percent_away_best_3)
+    percent_away_worst.append(percent_away_worst_3)
+
+df_ranking = pd.DataFrame(list(zip(companies, scores, percent_away_best, percent_away_worst)),
+                          columns=["Company", "Score", "% away from Best Scenario", "% away from Worst Scenario"])
+
 
 # Apply conditional styles with arrows
 def style_percentages(value, scenario):
@@ -228,27 +205,17 @@ def style_percentages(value, scenario):
     elif scenario == "worst":
         return f"🔻{value:.2f}%"
 
-df_ranking["% away from Best Scenario"] = df_ranking.apply(lambda row: style_percentages(row["% away from Best Scenario"], "best"), axis=1)
-df_ranking["% away from Worst Scenario"] = df_ranking.apply(lambda row: style_percentages(row["% away from Worst Scenario"], "worst"), axis=1)
+
+df_ranking["% away from Best Scenario"] = df_ranking.apply(
+    lambda row: style_percentages(row["% away from Best Scenario"], "best"), axis=1)
+df_ranking["% away from Worst Scenario"] = df_ranking.apply(
+    lambda row: style_percentages(row["% away from Worst Scenario"], "worst"), axis=1)
 
 # Display ranking table
 st.subheader("Overall Company Ranking")
-st.dataframe(df_ranking.style.applymap(lambda x: 'color: red' if isinstance(x, str) and x.startswith('🔺') else ('color: green' if isinstance(x, str) and x.startswith('🔻') else '')).set_table_styles([{
+st.dataframe(df_ranking.style.applymap(lambda x: 'color: red' if isinstance(x, str) and x.startswith('🔺') else (
+    'color: green' if isinstance(x, str) and x.startswith('🔻') else '')).set_table_styles([{
     'selector': 'td',
     'props': [
-        ('max-width', '200px'), ('font-size', '12px')]
-}]))
+        ('max-width', '200px'), ('font-size', '12px')]}]))
 
-st.markdown(
-    """
-    <style>
-    .stDataFrame tbody tr:nth-child(even) {
-        background-color: #f0f2f6;
-    }
-    .stDataFrame tbody tr:nth-child(odd) {
-        background-color: #ffffff;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
